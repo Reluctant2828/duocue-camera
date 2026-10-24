@@ -2,6 +2,8 @@
 
 给 iPhone Duo 的自用相机：在内屏取景和拍摄，在外屏循环播放你导入的 GIF 或视频。使用原生 SwiftUI、AVFoundation 和 iOS 27.1 的 `CameraCaptureAccessory`，没有第三方运行时依赖。
 
+iOS 桌面显示名使用 ASCII `DuoCue`，以兼容尚未包含非拉丁 App ID 名称修复的 SideStore 版本；拍摄界面仍为中文。
+
 ## 当前交付状态
 
 源码、Xcode 工程、Windows 检查工具和手动云端构建配置保存在这里。**在 Windows 上通过项目检查，不代表已经编译 iOS App。IPA 只有云端构建成功后才会产生；安装、相机和 Duo 外屏效果必须在真机验收。**

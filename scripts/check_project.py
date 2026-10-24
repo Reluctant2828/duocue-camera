@@ -34,6 +34,9 @@ def check() -> list[str]:
         for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryAddUsageDescription"]:
             if not info.get(key):
                 errors.append(f"Missing permission text: {key}")
+        display_name = info.get("CFBundleDisplayName", "")
+        if not display_name.isascii() or not display_name:
+            errors.append("CFBundleDisplayName must be non-empty ASCII for SideStore App ID registration")
     except Exception:
         pass
     for path in (ROOT / "DuoCue/Assets.xcassets").rglob("Contents.json"):
