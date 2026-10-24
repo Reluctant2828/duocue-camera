@@ -6,7 +6,7 @@ iOS 桌面显示名使用 ASCII `DuoCue`，以兼容尚未包含非拉丁 App ID
 
 ## 当前交付状态
 
-源码、Xcode 工程、Windows 检查工具和手动云端构建配置保存在这里。**在 Windows 上通过项目检查，不代表已经编译 iOS App。IPA 只有云端构建成功后才会产生；安装、相机和 Duo 外屏效果必须在真机验收。**
+源码、Xcode 工程、Windows 检查工具和手动云端构建配置保存在这里。GitHub Actions 构建 #2 已通过 Xcode 27.1 编译与 10 项 XCTest，并生成 SideStore 兼容包。**签名安装、相机和 Duo 外屏效果仍需真机验收。**
 
 设备要求：iPhone Duo，iOS 27.1 或更高版本。外屏内容只能在本 App 的拍摄界面、活动相机采集期间由系统显示；系统会在退后台、合拢或其他不满足条件时收回内容。它不会替换苹果“相机”里固定的“看看镜头”素材。
 
@@ -62,6 +62,6 @@ python -m unittest discover -s scripts/tests -v
 
 ## 验证边界
 
-Windows 只能检查工程引用、XML/JSON、权限声明和打包工具。Swift 编译由 Xcode 完成，免费签名能否安装、外屏是否出现、相机方向/收音和中断恢复由真机确认。具体测试步骤见 [DEVICE_TESTS.md](docs/DEVICE_TESTS.md)。
+Windows 检查、Xcode 27.1 编译和 10 项 XCTest 已通过；SideStore 兼容 IPA 已生成。免费签名能否安装、外屏是否出现、相机方向/收音和中断恢复由真机确认。具体测试步骤见 [DEVICE_TESTS.md](docs/DEVICE_TESTS.md)。
 
 苹果接口参考：[CameraCaptureAccessory](https://developer.apple.com/documentation/swiftui/cameracaptureaccessory) · [相机外屏配件](https://developer.apple.com/documentation/avfoundation/registering-a-camera-capture-accessory-on-iphone-duo)。
