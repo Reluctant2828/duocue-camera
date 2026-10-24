@@ -104,7 +104,7 @@ final class CameraService: NSObject, ObservableObject {
             UIApplication.shared.applicationState != .background
         }
         guard appIsForeground else { stop(); return }
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             sessionQueue.async { [weak self] in
                 guard let self else { continuation.resume(); return }
                 guard self.startGeneration == generation, self.wantsRunning else {
@@ -384,9 +384,10 @@ final class CameraService: NSObject, ObservableObject {
     private func startSessionIfNeeded() {
         guard configured, wantsRunning, !session.isInterrupted else { return }
         if !session.isRunning { session.startRunning() }
+        let running = session.isRunning
         publish {
-            $0.isRunning = self.session.isRunning
-            $0.statusMessage = self.session.isRunning ? "相机已就绪" : "等待相机恢复"
+            $0.isRunning = running
+            $0.statusMessage = running ? "相机已就绪" : "等待相机恢复"
         }
     }
 

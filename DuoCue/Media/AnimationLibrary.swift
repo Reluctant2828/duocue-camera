@@ -237,7 +237,8 @@ final class AnimationLibrary: ObservableObject {
         let fileExtension: String
         let thumbnail: CGImage
         if let imageSource = CGImageSourceCreateWithURL(staging as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-           CGImageSourceGetType(imageSource).map({ $0 as String }) == UTType.gif.identifier {
+           let sourceType = CGImageSourceGetType(imageSource),
+           sourceType as String == UTType.gif.identifier {
             kind = .gif
             fileExtension = "gif"
             guard CGImageSourceGetCount(imageSource) > 0,
@@ -269,8 +270,10 @@ final class AnimationLibrary: ObservableObject {
                 throw MediaError.unsupportedMedia
             }
             let asset = AVURLAsset(url: staging)
-            guard try await asset.load(.isPlayable), !(try await asset.load(.hasProtectedContent)),
-                  !(try await asset.loadTracks(withMediaType: .video)).isEmpty else {
+            let playable = try await asset.load(.isPlayable)
+            let protected = try await asset.load(.hasProtectedContent)
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard playable, !protected, !tracks.isEmpty else {
                 throw MediaError.unsupportedMedia
             }
             let duration = try await asset.load(.duration).seconds

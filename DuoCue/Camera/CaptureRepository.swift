@@ -162,14 +162,15 @@ private final class CaptureDiskStore: @unchecked Sendable {
         let support = FileManager.default.urls(for: .applicationSupportDirectory,
                                                in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        directory = customDirectory
+        let storageDirectory = customDirectory
             ?? support.appendingPathComponent("DuoCue/Captures", isDirectory: true)
+        directory = storageDirectory
         var recovered: [PendingCapture] = []
         var failure: String?
         do {
-            try FileManager.default.createDirectory(at: directory,
+            try FileManager.default.createDirectory(at: storageDirectory,
                                                     withIntermediateDirectories: true)
-            let index = directory.appendingPathComponent("index.json")
+            let index = storageDirectory.appendingPathComponent("index.json")
             if FileManager.default.fileExists(atPath: index.path) {
                 do {
                     let decoded = try JSONDecoder().decode([PendingCapture].self,
@@ -177,9 +178,8 @@ private final class CaptureDiskStore: @unchecked Sendable {
                     // Only accept an indexed basename; imported metadata can
                     // never point outside the recovery directory.
                     recovered = decoded.filter {
-                        $0.fileName == URL(fileURLWithPath: $0.fileName).lastPathComponent
-                            && FileManager.default.fileExists(
-                                atPath: directory.appendingPathComponent($0.fileName).path)
+                        guard let url = Self.validatedURL(for: $0, in: storageDirectory) else { return false }
+                        return FileManager.default.fileExists(atPath: url.path)
                     }
                 } catch {
                     failure = error.localizedDescription
@@ -189,7 +189,7 @@ private final class CaptureDiskStore: @unchecked Sendable {
             // Recover files written just before a crash or an interrupted index
             // write, without requiring an intact index.json.
             let files = try FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: [.creationDateKey, .fileSizeKey])
+                at: storageDirectory, includingPropertiesForKeys: [.creationDateKey, .fileSizeKey])
             for file in files where !recovered.contains(where: { $0.fileName == file.lastPathComponent }) {
                 let stem = file.deletingPathExtension().lastPathComponent
                 let pieces = stem.split(separator: "_", maxSplits: 1)
@@ -201,8 +201,10 @@ private final class CaptureDiskStore: @unchecked Sendable {
                 }
                 let values = try file.resourceValues(forKeys: [.creationDateKey, .fileSizeKey])
                 guard (values.fileSize ?? 0) > 0 else { continue }
-                recovered.append(PendingCapture(id: id, fileName: file.lastPathComponent,
-                                                kind: kind, createdAt: values.creationDate ?? Date()))
+                let item = PendingCapture(id: id, fileName: file.lastPathComponent,
+                                          kind: kind, createdAt: values.creationDate ?? Date())
+                guard Self.validatedURL(for: item, in: storageDirectory) != nil else { continue }
+                recovered.append(item)
             }
             recovered.sort { $0.createdAt > $1.createdAt }
         } catch {
@@ -214,6 +216,10 @@ private final class CaptureDiskStore: @unchecked Sendable {
     }
 
     func safeURL(for item: PendingCapture) -> URL? {
+        Self.validatedURL(for: item, in: directory)
+    }
+
+    private static func validatedURL(for item: PendingCapture, in directory: URL) -> URL? {
         let name = item.fileName
         guard !name.isEmpty, !name.contains("/"), !name.contains("\\"),
               name != ".", name != "..",

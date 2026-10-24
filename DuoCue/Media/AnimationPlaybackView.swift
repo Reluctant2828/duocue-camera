@@ -35,7 +35,7 @@ private struct LoopingVideoView: UIViewRepresentable {
     let isPlaying: Bool
 
     func makeUIView(context: Context) -> PlayerSurface {
-        let view = PlayerSurface()
+        let view = PlayerSurface(frame: .zero)
         view.setSource(url)
         return view
     }
@@ -215,10 +215,13 @@ private final class GIFPlaybackController: ObservableObject {
         lastFrame = -1
         decoder = nil
         timeline = nil
+        let decodingTask = Task.detached(priority: .userInitiated) {
+            try GIFFrameDecoder(url: url)
+        }
         do {
-            let prepared = try await Task.detached(priority: .userInitiated) {
-                try GIFFrameDecoder(url: url)
-            }.value
+            let prepared = try await withTaskCancellationHandler(operation: {
+                try await decodingTask.value
+            }, onCancel: { decodingTask.cancel() })
             try Task.checkCancellation()
             guard token == generation else { return }
             let frames = await prepared.timeline
