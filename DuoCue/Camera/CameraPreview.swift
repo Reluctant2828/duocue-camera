@@ -4,6 +4,8 @@ import UIKit
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    let device: AVCaptureDevice?
+    let onCaptureRotation: (CGFloat) -> Void
     let onFocus: (CGPoint) -> Void
     let onZoom: (CGFloat) -> Void
     let currentZoom: CGFloat
@@ -15,6 +17,7 @@ struct CameraPreview: UIViewRepresentable {
         view.onFocus = onFocus
         view.onZoom = onZoom
         view.currentZoom = currentZoom
+        view.connectRotation(device: device, onCaptureRotation: onCaptureRotation)
         return view
     }
 
@@ -22,11 +25,11 @@ struct CameraPreview: UIViewRepresentable {
         view.onFocus = onFocus
         view.onZoom = onZoom
         view.currentZoom = currentZoom
-        view.updateRotation()
+        view.connectRotation(device: device, onCaptureRotation: onCaptureRotation)
     }
 
     static func dismantleUIView(_ view: PreviewSurface, coordinator: ()) {
-        view.previewLayer.session = nil
+        view.disconnect()
     }
 }
 
@@ -38,6 +41,7 @@ final class PreviewSurface: UIView {
     var currentZoom: CGFloat = 1
     private var initialZoom: CGFloat = 1
     private let focusIndicator = UIView()
+    private let rotationObserver = CameraRotationObserver()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -56,24 +60,21 @@ final class PreviewSurface: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        updateRotation()
+        rotationObserver.applyCurrentAngles()
     }
 
-    func updateRotation() {
-        guard let connection = previewLayer.connection,
-              let orientation = window?.windowScene?.interfaceOrientation else { return }
-        let angle: CGFloat
-        switch orientation {
-        // Interface orientation and physical UIDeviceOrientation use opposite
-        // landscape names. Keep preview and captured movie aligned.
-        case .landscapeLeft: angle = 180
-        case .landscapeRight: angle = 0
-        case .portraitUpsideDown: angle = 270
-        default: angle = 90
-        }
-        if connection.isVideoRotationAngleSupported(angle) {
-            connection.videoRotationAngle = angle
-        }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { rotationObserver.previewDidMoveToWindow() }
+    }
+
+    func connectRotation(device: AVCaptureDevice?, onCaptureRotation: @escaping (CGFloat) -> Void) {
+        rotationObserver.connect(device: device, previewLayer: previewLayer, captureAngleChanged: onCaptureRotation)
+    }
+
+    func disconnect() {
+        rotationObserver.disconnect()
+        previewLayer.session = nil
     }
 
     @objc private func focus(_ gesture: UITapGestureRecognizer) {

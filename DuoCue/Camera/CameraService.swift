@@ -12,6 +12,8 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isRecording = false
     @Published private(set) var isBusy = false
+    @Published private(set) var captureDevice: AVCaptureDevice?
+    @Published private(set) var isOrientationReady = false
     @Published private(set) var zoom: CGFloat = 1
     @Published private(set) var maxZoom: CGFloat = 1
     @Published var errorMessage: String?
@@ -32,7 +34,7 @@ final class CameraService: NSObject, ObservableObject {
     private var recordingStopRequested = false
     private var recordingStopSubmitted = false
     private var photoInFlight = false
-    private var rotationAngle: CGFloat = 90
+    private var rotation = CaptureRotationState()
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]
     private var observers: [NSObjectProtocol] = []
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -153,7 +155,8 @@ final class CameraService: NSObject, ObservableObject {
     func capturePhoto() {
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning, self.wantsRunning,
-                  !self.movieInFlight, !self.recordingSetup, !self.photoInFlight else { return }
+                  !self.movieInFlight, !self.recordingSetup, !self.photoInFlight,
+                  self.rotation.latestAngle != nil else { return }
             self.photoInFlight = true
             self.publish { $0.isBusy = true }
             let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
@@ -204,7 +207,7 @@ final class CameraService: NSObject, ObservableObject {
                     return
                 }
                 guard self.session.isRunning, self.wantsRunning,
-                      !self.photoInFlight,
+                      !self.photoInFlight, self.rotation.latestAngle != nil,
                       let id = self.recordingRequest.beginPreparation() else {
                     continuation.resume(returning: nil)
                     return
@@ -241,7 +244,12 @@ final class CameraService: NSObject, ObservableObject {
                 // Reserve room for the movie container to be finalized when
                 // storage runs low, instead of recording until the volume fills.
                 self.movieOutput.minFreeDiskSpaceLimit = 50 * 1024 * 1024
-                self.applyRotation(to: self.movieOutput.connection(with: .video))
+                guard let movieAngle = self.rotation.beginRecording() else {
+                    self.releaseAudio()
+                    self.publish { $0.isBusy = false }
+                    return
+                }
+                self.applyRotation(to: self.movieOutput.connection(with: .video), angle: movieAngle)
                 self.movieInFlight = true
                 self.recordingStopRequested = false
                 self.recordingStopSubmitted = false
@@ -299,18 +307,12 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    func updateOrientation(_ orientation: UIDeviceOrientation) {
-        let angle: CGFloat
-        switch orientation {
-        case .portrait: angle = 90
-        case .portraitUpsideDown: angle = 270
-        case .landscapeLeft: angle = 0
-        case .landscapeRight: angle = 180
-        default: return
-        }
+    func updateCaptureRotation(_ angle: CGFloat) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.rotationAngle = angle
+            let wasReady = self.rotation.latestAngle != nil
+            guard self.rotation.update(angle) else { return }
+            if !wasReady { self.publish { $0.isOrientationReady = true } }
             self.applyRotation(to: self.photoOutput.connection(with: .video))
             // A movie keeps the orientation that it had when recording began.
             if !self.movieInFlight {
@@ -350,6 +352,7 @@ final class CameraService: NSObject, ObservableObject {
         camera.unlockForConfiguration()
         let maximum = min(camera.maxAvailableVideoZoomFactor, 8)
         publish {
+            $0.captureDevice = camera
             $0.zoom = camera.videoZoomFactor
             $0.maxZoom = maximum
         }
@@ -407,10 +410,10 @@ final class CameraService: NSObject, ObservableObject {
         movieOutput.stopRecording()
     }
 
-    private func applyRotation(to connection: AVCaptureConnection?) {
-        guard let connection,
-              connection.isVideoRotationAngleSupported(rotationAngle) else { return }
-        connection.videoRotationAngle = rotationAngle
+    private func applyRotation(to connection: AVCaptureConnection?, angle: CGFloat? = nil) {
+        guard let connection, let angle = angle ?? rotation.latestAngle,
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        if connection.videoRotationAngle != angle { connection.videoRotationAngle = angle }
     }
 
     private func startSessionIfNeeded() {
@@ -473,9 +476,12 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.movieInFlight = false
+            self.rotation.finishRecording()
             self.recordingStopRequested = false
             self.recordingStopSubmitted = false
             self.releaseAudio()
+            self.applyRotation(to: self.photoOutput.connection(with: .video))
+            self.applyRotation(to: self.movieOutput.connection(with: .video))
             self.publish { $0.isRecording = false; $0.isBusy = false }
             if self.stopRequested || !self.wantsRunning { self.stopSessionNow() }
             else { self.startSessionIfNeeded() }

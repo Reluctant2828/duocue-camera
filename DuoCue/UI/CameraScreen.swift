@@ -54,9 +54,7 @@ struct CameraScreen: View {
             accessoryEnabled = enabled
         }
         .task {
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             await camera.start()
-            camera.updateOrientation(UIDevice.current.orientation)
             if !didReadGuide { showingGuide = true }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -76,13 +74,9 @@ struct CameraScreen: View {
         .onChange(of: camera.isRecording) { _, recording in
             recordingStartedAt = recording ? Date() : nil
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            camera.updateOrientation(UIDevice.current.orientation)
-        }
         .onDisappear {
             camera.stop()
             UIApplication.shared.isIdleTimerDisabled = false
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
         .sheet(isPresented: $showingLibrary) { AnimationLibraryScreen(library: library) }
         .sheet(isPresented: $showingCaptures) { PendingCapturesScreen(repository: camera.captures) }
@@ -129,7 +123,9 @@ struct CameraScreen: View {
     private var viewfinder: some View {
         GeometryReader { geometry in
             ZStack {
-                CameraPreview(session: camera.session, onFocus: camera.focus, onZoom: camera.setZoom, currentZoom: camera.zoom)
+                CameraPreview(session: camera.session, device: camera.captureDevice,
+                              onCaptureRotation: camera.updateCaptureRotation,
+                              onFocus: camera.focus, onZoom: camera.setZoom, currentZoom: camera.zoom)
                 if !camera.isRunning {
                     VStack(spacing: 14) {
                         Image(systemName: "camera.aperture").font(.system(size: 40)).foregroundStyle(.yellow)
@@ -204,7 +200,7 @@ struct CameraScreen: View {
                         }
                     }
                 }
-                .disabled(!camera.isRunning || (camera.isBusy && !camera.isRecording))
+                .disabled(!camera.isRunning || !camera.isOrientationReady || (camera.isBusy && !camera.isRecording))
                 .opacity(camera.isRunning ? 1 : 0.5)
                 .accessibilityLabel(camera.isRecording ? "停止录像" : (mode == .video ? "开始录像" : "拍照"))
                 .accessibilityIdentifier("shutterButton")
