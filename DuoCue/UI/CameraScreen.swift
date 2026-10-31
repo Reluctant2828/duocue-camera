@@ -13,26 +13,45 @@ struct CameraScreen: View {
     @State private var showingGuide = false
     @State private var mode: CaptureMode = .photo
     @State private var recordingStartedAt: Date?
+    @State private var accessoryEnabled = false
+
+    private var showsSheet: Bool { showingLibrary || showingCaptures || showingGuide }
+    private var shouldEnableAccessory: Bool {
+        display.isEnabled && !showsSheet && scenePhase == .active && camera.isRunning
+    }
 
     private enum CaptureMode: String, CaseIterable { case photo = "照片", video = "视频" }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            viewfinder
-            controls
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                header
+                if geometry.size.width > geometry.size.height * 1.25 {
+                    HStack(spacing: 0) {
+                        viewfinder
+                        controls.frame(width: min(300, geometry.size.width * 0.34))
+                    }
+                } else {
+                    viewfinder
+                    controls
+                }
+            }
         }
         .background(Color.black)
         .sceneAccessory {
-            CameraCaptureAccessory(isEnabled: accessoryBinding) {
+            CameraCaptureAccessory(isEnabled: $accessoryEnabled) {
                 OuterAnimationScreen(library: library, display: display)
             }
             .onAvailabilityChange { available in
                 Task { @MainActor in
                     display.isAvailable = available
-                    if !available { display.isPresented = false }
                 }
             }
+        }
+        .onChange(of: shouldEnableAccessory, initial: true) { _, enabled in
+            // A modal or system state can suspend presentation without changing
+            // the user's persisted switch. Restore it when capture returns.
+            accessoryEnabled = enabled
         }
         .task {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -45,12 +64,14 @@ struct CameraScreen: View {
                 Task { await camera.start() }
             } else if phase == .background {
                 camera.stop()
-                display.isPresented = false
             }
-            UIApplication.shared.isIdleTimerDisabled = phase == .active && camera.isRunning
+            UIApplication.shared.isIdleTimerDisabled = phase == .active && camera.isRunning && !showsSheet
         }
         .onChange(of: camera.isRunning) { _, running in
-            UIApplication.shared.isIdleTimerDisabled = running && scenePhase == .active
+            UIApplication.shared.isIdleTimerDisabled = running && scenePhase == .active && !showsSheet
+        }
+        .onChange(of: showsSheet) { _, showing in
+            UIApplication.shared.isIdleTimerDisabled = !showing && camera.isRunning && scenePhase == .active
         }
         .onChange(of: camera.isRecording) { _, recording in
             recordingStartedAt = recording ? Date() : nil
@@ -75,17 +96,6 @@ struct CameraScreen: View {
         } message: { Text(camera.errorMessage ?? "") }
     }
 
-    private var accessoryBinding: Binding<Bool> {
-        Binding(
-            get: { display.isEnabled && !showingLibrary && !showingCaptures && !showingGuide && scenePhase == .active },
-            set: { value in
-                // The binding represents user enablement; system availability is
-                // delivered separately through onAvailabilityChange.
-                if !showingLibrary && !showingCaptures && !showingGuide { display.isEnabled = value }
-            }
-        )
-    }
-
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
@@ -96,7 +106,7 @@ struct CameraScreen: View {
                     .accessibilityIdentifier("outerDisplayStatus")
             }
             Spacer(minLength: 4)
-            if display.isAvailable || display.isPresented || !display.isEnabled {
+            Group {
                 Button {
                     display.isEnabled.toggle()
                 } label: {
@@ -104,13 +114,13 @@ struct CameraScreen: View {
                         .font(.title3)
                         .frame(width: 40, height: 44)
                 }
-                .accessibilityLabel(display.isEnabled ? "关闭外屏动画" : "打开外屏动画")
+                .accessibilityLabel(display.isEnabled ? "关闭外屏素材" : "打开外屏素材")
             }
             Button { showingGuide = true } label: {
                 Image(systemName: "questionmark.circle").font(.title3).frame(width: 40, height: 44)
             }
             .accessibilityLabel("使用帮助")
-            .disabled(camera.isRecording)
+            .disabled(camera.isRecording || camera.isBusy)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
@@ -123,7 +133,7 @@ struct CameraScreen: View {
                 if !camera.isRunning {
                     VStack(spacing: 14) {
                         Image(systemName: "camera.aperture").font(.system(size: 40)).foregroundStyle(.yellow)
-                        Text("正在准备相机").font(.headline)
+                        Text(camera.errorMessage == nil ? "相机尚未就绪" : "相机暂不可用").font(.headline)
                         Button("重新启动") { Task { await camera.start() } }
                             .buttonStyle(.bordered)
                     }
@@ -178,10 +188,10 @@ struct CameraScreen: View {
                 Button { showingLibrary = true } label: {
                     VStack(spacing: 5) {
                         Image(systemName: "sparkles.tv").font(.title2)
-                        Text("选动画").font(.caption)
+                        Text("选素材").font(.caption)
                     }.frame(width: 70, height: 70)
                 }
-                .disabled(camera.isRecording)
+                .disabled(camera.isRecording || camera.isBusy)
                 .accessibilityIdentifier("openAnimationLibrary")
                 Spacer()
                 Button { shutter() } label: {
@@ -204,11 +214,11 @@ struct CameraScreen: View {
                         Image(systemName: "photo.stack").font(.title2)
                         Text("保存记录").font(.caption)
                     }.frame(width: 70, height: 70)
-                }.disabled(camera.isRecording)
+                }.disabled(camera.isRecording || camera.isBusy)
             }
             HStack(spacing: 6) {
                 Image(systemName: "play.rectangle")
-                Text(library.selectedAsset?.name ?? "内置测试动画")
+                Text(library.selectedAsset?.name ?? "内置笑脸")
                     .lineLimit(1)
             }
             .font(.caption).foregroundStyle(.secondary)

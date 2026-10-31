@@ -27,7 +27,10 @@ final class CameraService: NSObject, ObservableObject {
     private var startGeneration = 0
     private var stopRequested = false
     private var movieInFlight = false
-    private var recordingSetup = false
+    private var recordingRequest = RecordingRequestState()
+    private var recordingSetup: Bool { recordingRequest.preparationID != nil }
+    private var recordingStopRequested = false
+    private var recordingStopSubmitted = false
     private var photoInFlight = false
     private var rotationAngle: CGFloat = 90
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]
@@ -41,7 +44,7 @@ final class CameraService: NSObject, ObservableObject {
                                              object: session, queue: nil) { [weak self] _ in
             guard let self else { return }
             self.sessionQueue.async {
-                if self.movieOutput.isRecording { self.movieOutput.stopRecording() }
+                if self.movieInFlight { self.requestRecordingStop() }
                 self.publish {
                     $0.isRunning = false
                     $0.statusMessage = "相机暂时被系统中断，恢复后可以继续拍摄"
@@ -133,9 +136,10 @@ final class CameraService: NSObject, ObservableObject {
             self.startGeneration += 1
             self.wantsRunning = false
             self.stopRequested = true
+            self.recordingRequest.cancelPreparation()
             if self.movieInFlight {
                 self.beginBackgroundCompletion()
-                if self.movieOutput.isRecording { self.movieOutput.stopRecording() }
+                self.requestRecordingStop()
                 return
             }
             if self.photoInFlight {
@@ -191,35 +195,43 @@ final class CameraService: NSObject, ObservableObject {
     func toggleRecording() async {
         // Reserve the operation on the session queue before asking permission,
         // so repeated button taps cannot configure multiple audio inputs.
-        let shouldSetUp: Bool = await withCheckedContinuation { continuation in
+        let requestID: UUID? = await withCheckedContinuation { continuation in
             sessionQueue.async { [weak self] in
-                guard let self else { continuation.resume(returning: false); return }
+                guard let self else { continuation.resume(returning: nil); return }
                 if self.movieInFlight {
-                    if self.movieOutput.isRecording { self.movieOutput.stopRecording() }
-                    continuation.resume(returning: false)
+                    self.requestRecordingStop()
+                    continuation.resume(returning: nil)
                     return
                 }
                 guard self.session.isRunning, self.wantsRunning,
-                      !self.recordingSetup, !self.photoInFlight else {
-                    continuation.resume(returning: false)
+                      !self.photoInFlight,
+                      let id = self.recordingRequest.beginPreparation() else {
+                    continuation.resume(returning: nil)
                     return
                 }
-                self.recordingSetup = true
                 self.publish { $0.isBusy = true }
-                continuation.resume(returning: true)
+                continuation.resume(returning: id)
             }
         }
-        guard shouldSetUp else { return }
+        guard let requestID else { return }
         var audioPermission = AVCaptureDevice.authorizationStatus(for: .audio)
         if audioPermission == .notDetermined {
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
             audioPermission = granted ? .authorized : .denied
         }
         let canRecordAudio = audioPermission == .authorized
+        let appIsForeground = await MainActor.run {
+            UIApplication.shared.applicationState != .background
+        }
+        let wasCancelled = Task.isCancelled
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.recordingSetup = false
-            guard self.session.isRunning, self.wantsRunning else {
+            // A permission prompt may outlive stop(), then start() may run when
+            // the app returns. An old grant must not start a new recording or
+            // clear a newer request's pending state.
+            guard self.recordingRequest.finishPreparation(requestID) else { return }
+            guard self.session.isRunning, self.wantsRunning,
+                  appIsForeground, !wasCancelled else {
                 self.publish { $0.isBusy = false }
                 return
             }
@@ -231,6 +243,8 @@ final class CameraService: NSObject, ObservableObject {
                 self.movieOutput.minFreeDiskSpaceLimit = 50 * 1024 * 1024
                 self.applyRotation(to: self.movieOutput.connection(with: .video))
                 self.movieInFlight = true
+                self.recordingStopRequested = false
+                self.recordingStopSubmitted = false
                 self.movieOutput.startRecording(to: url, recordingDelegate: self)
                 self.publish {
                     $0.statusMessage = canRecordAudio ? "正在录像，外屏动画保持静音" : "未授权麦克风，正在录制无声视频"
@@ -375,6 +389,24 @@ final class CameraService: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
+    /// Called only on sessionQueue. The output may still be starting; retain
+    /// stop intent until didStartRecordingTo, and never submit stop twice.
+    private func requestRecordingStop() {
+        guard movieInFlight, !recordingStopRequested else { return }
+        recordingStopRequested = true
+        publish {
+            $0.isBusy = true
+            $0.statusMessage = "正在完成录像，请稍候…"
+        }
+        stopMovieOutputIfNeeded()
+    }
+
+    private func stopMovieOutputIfNeeded() {
+        guard !recordingStopSubmitted, movieOutput.isRecording else { return }
+        recordingStopSubmitted = true
+        movieOutput.stopRecording()
+    }
+
     private func applyRotation(to connection: AVCaptureConnection?) {
         guard let connection,
               connection.isVideoRotationAngleSupported(rotationAngle) else { return }
@@ -427,8 +459,12 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
                     from connections: [AVCaptureConnection]) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.publish { $0.isRecording = true; $0.isBusy = false }
-            if self.stopRequested || !self.wantsRunning { self.movieOutput.stopRecording() }
+            let shouldStop = self.recordingStopRequested || self.stopRequested || !self.wantsRunning
+            self.publish { $0.isRecording = true; $0.isBusy = shouldStop }
+            if shouldStop {
+                self.recordingStopRequested = true
+                self.stopMovieOutputIfNeeded()
+            }
         }
     }
 
@@ -437,6 +473,8 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.movieInFlight = false
+            self.recordingStopRequested = false
+            self.recordingStopSubmitted = false
             self.releaseAudio()
             self.publish { $0.isRecording = false; $0.isBusy = false }
             if self.stopRequested || !self.wantsRunning { self.stopSessionNow() }
@@ -470,6 +508,29 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
                 self.errorMessage = "录像文件仍在本机，但登记或保存失败：\(error.localizedDescription)"
             }
         }
+    }
+}
+
+/// Reservation survives an asynchronous microphone permission request. A stop
+/// invalidates that reservation even if the camera starts again before the
+/// permission callback arrives.
+struct RecordingRequestState {
+    private(set) var preparationID: UUID?
+
+    mutating func beginPreparation(id: UUID = UUID()) -> UUID? {
+        guard preparationID == nil else { return nil }
+        preparationID = id
+        return id
+    }
+
+    mutating func finishPreparation(_ id: UUID) -> Bool {
+        guard preparationID == id else { return false }
+        preparationID = nil
+        return true
+    }
+
+    mutating func cancelPreparation() {
+        preparationID = nil
     }
 }
 

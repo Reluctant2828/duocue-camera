@@ -1,12 +1,14 @@
 # 镜头小剧场 · DuoCue
 
-给 iPhone Duo 的自用相机：在内屏取景和拍摄，在外屏循环播放你导入的 GIF 或视频。使用原生 SwiftUI、AVFoundation 和 iOS 27.1 的 `CameraCaptureAccessory`，没有第三方运行时依赖。
+给 iPhone Duo 的自用相机：在内屏取景和拍摄，在外屏显示图片、循环播放 GIF 或视频。使用原生 SwiftUI、AVFoundation 和 iOS 27.1 的 `CameraCaptureAccessory`，没有第三方运行时依赖。
+
+0.2.0 重做相册导入，新增图片支持，并改进取消、预览、横屏拍摄和状态恢复。使用与更新说明见 [本次更新](docs/RELEASE-0.2.0.md)。
 
 iOS 桌面显示名使用 ASCII `DuoCue`，以兼容尚未包含非拉丁 App ID 名称修复的 SideStore 版本；拍摄界面仍为中文。
 
 ## 当前交付状态
 
-源码、Xcode 工程、Windows 检查工具和手动云端构建配置保存在这里。GitHub Actions 构建 #2 已通过 Xcode 27.1 编译与 10 项 XCTest，并生成 SideStore 兼容包。**签名安装、相机和 Duo 外屏效果仍需真机验收。**
+源码、Xcode 工程、Windows 检查工具和手动云端构建配置保存在这里。0.1.0 的 SideStore 安装与使用已由用户确认；0.2.0 回归结果见 [验证记录](docs/VALIDATION.md)。**新增的相册导入、相机和 Duo 外屏流程仍需在覆盖安装后验收。**
 
 设备要求：iPhone Duo，iOS 27.1 或更高版本。外屏内容只能在本 App 的拍摄界面、活动相机采集期间由系统显示；系统会在退后台、合拢或其他不满足条件时收回内容。它不会替换苹果“相机”里固定的“看看镜头”素材。
 

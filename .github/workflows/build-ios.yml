@@ -72,11 +72,20 @@ jobs:
             build/DuoCue-unsigned.ipa.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Export visual review attachments
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [ -d build/Tests.xcresult ]; then
+            xcrun xcresulttool export attachments --path build/Tests.xcresult --output-path build/test-attachments
+          fi
       - name: Upload test report
-        if: ${{ failure() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: DuoCue-test-report-${{ github.run_number }}
-          path: build/Tests.xcresult
+          path: |
+            build/Tests.xcresult
+            build/test-attachments
           if-no-files-found: ignore
           retention-days: 3

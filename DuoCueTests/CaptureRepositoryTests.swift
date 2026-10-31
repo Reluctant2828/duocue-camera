@@ -134,5 +134,24 @@ final class CaptureRepositoryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: repository.fileURL(for: original).path))
     }
 
+    @MainActor
+    func testCleanupIndexFailureDoesNotLeaveMissingFileInRecoveryList() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = PhotoLibraryClient(authorizationStatus: { .authorized }, requestAuthorization: { .authorized },
+                                       save: { _, _ in })
+        let repository = CaptureRepository(storageDirectory: directory, photoLibrary: client)
+        let item = try await repository.addPhoto(Data([1, 2, 3]))
+        let indexURL = directory.appendingPathComponent("index.json")
+        try FileManager.default.removeItem(at: indexURL)
+        try FileManager.default.createDirectory(at: indexURL, withIntermediateDirectories: false)
+
+        await repository.saveToPhotos(item)
+
+        XCTAssertTrue(repository.items.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.fileURL(for: item).path))
+        XCTAssertEqual(repository.message, "已保存到系统相册")
+    }
+
     private enum TestError: Error { case saveFailed }
 }

@@ -131,10 +131,16 @@ final class CaptureRepository: ObservableObject {
                 items.removeAll { $0.id == item.id }
                 message = "已保存到系统相册"
             } catch {
-                // The photo is safe in Photos. Keep the recovery file visible
-                // rather than silently discarding an index/cleanup failure.
-                message = "已保存到相册，本机副本暂未清理"
-                errorMessage = "相册已保存成功，本机副本清理失败：\(error.localizedDescription)"
+                // A completed PhotoKit save is authoritative. If the file was
+                // already removed before an index write failed, don't offer a
+                // dead retry/export row (or save the same photograph twice).
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    items.removeAll { $0.id == item.id }
+                    message = "已保存到系统相册"
+                } else {
+                    message = "已保存到相册，本机副本暂未清理"
+                    errorMessage = "相册已保存成功，本机副本清理失败：\(error.localizedDescription)"
+                }
             }
         } catch {
             errorMessage = "保存到相册失败，原文件仍保留在本机：\(error.localizedDescription)"

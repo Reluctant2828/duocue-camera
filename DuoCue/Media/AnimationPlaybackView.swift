@@ -19,13 +19,51 @@ struct AnimationPlaybackView: View {
                     LoopingVideoView(url: fileURL, fit: fit, isPlaying: isPlaying)
                 case .gif:
                     GIFPlaybackView(url: fileURL, fit: fit, isPlaying: isPlaying)
+                case .image:
+                    StillImageView(url: fileURL, fit: fit)
                 }
             } else {
                 LensAttentionAnimation(isPlaying: isPlaying)
             }
         }
         .clipped()
-        .accessibilityLabel(asset.map { "外屏动画：\($0.name)" } ?? "外屏验证动画")
+        .accessibilityLabel(asset.map { "外屏素材：\($0.name)" } ?? "内置笑脸")
+    }
+}
+
+private struct StillImageView: View {
+    let url: URL
+    let fit: AnimationFit
+    @State private var image: CGImage?
+    @State private var error: String?
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                if let image {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .aspectRatio(contentMode: fit == .fit ? .fit : .fill)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else if let error {
+                    Text(error).font(.callout).foregroundStyle(.white.opacity(0.75)).padding()
+                } else { ProgressView().tint(.white) }
+            }.frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .task(id: url) {
+            image = nil
+            error = nil
+            let source = url
+            let decoding = Task.detached(priority: .userInitiated) { try StillImageDecoder.decode(url: source) }
+            do {
+                let result = try await withTaskCancellationHandler(operation: { try await decoding.value },
+                                                                  onCancel: { decoding.cancel() })
+                try Task.checkCancellation()
+                image = result
+            } catch is CancellationError { }
+            catch { self.error = "图片无法读取，请重新导入。" }
+        }
     }
 }
 
@@ -180,6 +218,7 @@ private struct GIFPlaybackView: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .task(id: url) { await playback.load(url: url, playing: isPlaying) }
+        .onAppear { playback.setPlaying(isPlaying) }
         .onChange(of: isPlaying) { _, playing in playback.setPlaying(playing) }
         .onDisappear { playback.setPlaying(false) }
     }
@@ -224,7 +263,7 @@ private final class GIFPlaybackController: ObservableObject {
             }, onCancel: { decodingTask.cancel() })
             try Task.checkCancellation()
             guard token == generation else { return }
-            let frames = await prepared.timeline
+            let frames = prepared.timeline
             let first = try await prepared.frame(at: 0)
             try Task.checkCancellation()
             guard token == generation else { return }
@@ -267,7 +306,11 @@ private final class GIFPlaybackController: ObservableObject {
                         return
                     }
                 }
-                do { try await Task.sleep(nanoseconds: 8_333_333) }
+                // Wake for the next frame, rather than polling at 120 Hz even
+                // when a GIF frame is meant to stay visible for a long time.
+                let position = self.elapsed.truncatingRemainder(dividingBy: timeline.duration)
+                let remaining = max(0.008, timeline.deadlines[index] - position)
+                do { try await Task.sleep(nanoseconds: UInt64(min(remaining, 0.25) * 1_000_000_000)) }
                 catch { return }
             }
         }
@@ -309,6 +352,7 @@ private actor GIFFrameDecoder {
         }
         guard let frame = CGImageSourceCreateThumbnailAtIndex(source, index, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: 1280,
             kCGImageSourceShouldCacheImmediately: true
         ] as CFDictionary) else { throw GIFError.unreadable }

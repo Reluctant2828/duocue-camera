@@ -19,8 +19,8 @@ final class OuterDisplayState: ObservableObject {
     }
 
     var status: String {
-        if !isEnabled { return "外屏动画已关闭" }
-        if isPresented { return "外屏正在播放" }
+        if !isEnabled { return "外屏素材已关闭" }
+        if isPresented && isAvailable { return "外屏正在显示" }
         if isAvailable { return "外屏已就绪" }
         return "展开手机，保持相机全屏"
     }

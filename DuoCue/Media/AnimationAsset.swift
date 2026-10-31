@@ -1,8 +1,17 @@
 import Foundation
 
 enum AnimationKind: String, Codable {
+    case image
     case gif
     case video
+
+    var title: String {
+        switch self {
+        case .image: return "图片"
+        case .gif: return "GIF"
+        case .video: return "视频"
+        }
+    }
 }
 
 enum AnimationFit: String, Codable, CaseIterable, Identifiable {

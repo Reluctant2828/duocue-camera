@@ -75,7 +75,7 @@ final class AnimationLibrary: ObservableObject {
         selectedID = item.id
     }
 
-    func importFile(at sourceURL: URL) async {
+    func importFile(at sourceURL: URL, suggestedName: String? = nil) async {
         guard !isImporting else { return }
         guard isStorageReady else {
             errorMessage = "素材目录暂时无法写入，请先处理目录读取错误。"
@@ -90,7 +90,8 @@ final class AnimationLibrary: ObservableObject {
         defer { if hasAccess { sourceURL.stopAccessingSecurityScopedResource() } }
         let targetDirectory = directory
         let task = Task.detached(priority: .userInitiated) {
-            try await Self.prepareImport(from: sourceURL, directory: targetDirectory)
+            try await Self.prepareImport(from: sourceURL, directory: targetDirectory,
+                                         suggestedName: suggestedName)
         }
         var prepared: AnimationAsset?
         do {
@@ -108,7 +109,9 @@ final class AnimationLibrary: ObservableObject {
             selectedID = result.id
             isRestoring = false
             prepared = nil
-            statusMessage = "已导入「\(result.name)」，拍摄时可在外屏循环播放。"
+            statusMessage = result.kind == .image
+                ? "已导入「\(result.name)」，拍摄时可在外屏显示。"
+                : "已导入「\(result.name)」，拍摄时可在外屏循环播放。"
         } catch is CancellationError {
             statusMessage = "已取消导入。"
         } catch {
@@ -125,7 +128,7 @@ final class AnimationLibrary: ObservableObject {
             return
         }
         let requestedName = URL(fileURLWithPath: suggestedName).lastPathComponent
-        let name = Self.isSafeFileName(requestedName) ? requestedName : "自定义动画.data"
+        let name = Self.isSafeFileName(requestedName) ? requestedName : "自定义素材.data"
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("duocue-import-\(UUID().uuidString)", isDirectory: true)
         let temp = tempDirectory.appendingPathComponent(name)
@@ -143,7 +146,7 @@ final class AnimationLibrary: ObservableObject {
             }.value
             try Task.checkCancellation()
             isImporting = false
-            await importFile(at: temp)
+            await importFile(at: temp, suggestedName: suggestedName)
         } catch is CancellationError {
             statusMessage = "已取消导入。"
         } catch {
@@ -213,10 +216,11 @@ final class AnimationLibrary: ObservableObject {
         let fit: AnimationFit
     }
 
-    nonisolated private static func prepareImport(from source: URL, directory: URL) async throws -> AnimationAsset {
+    nonisolated private static func prepareImport(from source: URL, directory: URL,
+                                                suggestedName: String?) async throws -> AnimationAsset {
         let manager = FileManager.default
         let id = UUID()
-        let staging = directory.appendingPathComponent(".import-\(id.uuidString).\(source.pathExtension)")
+        var staging = directory.appendingPathComponent(".import-\(id.uuidString).\(source.pathExtension)")
         var finalURL: URL?
         var thumbnailURL: URL?
         var committed = false
@@ -238,36 +242,47 @@ final class AnimationLibrary: ObservableObject {
         let thumbnail: CGImage
         if let imageSource = CGImageSourceCreateWithURL(staging as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
            let sourceType = CGImageSourceGetType(imageSource),
-           sourceType as String == UTType.gif.identifier {
-            kind = .gif
-            fileExtension = "gif"
+           let imageType = UTType(sourceType as String), imageType.conforms(to: .image) {
+            let isGIF = imageType.conforms(to: .gif)
+            kind = isGIF ? .gif : .image
+            fileExtension = isGIF ? "gif" : (imageType.preferredFilenameExtension ?? "image")
+            let primaryIndex = isGIF ? 0 : CGImageSourceGetPrimaryImageIndex(imageSource)
             guard CGImageSourceGetCount(imageSource) > 0,
-                  let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, [
+                  let image = CGImageSourceCreateThumbnailAtIndex(imageSource, primaryIndex, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceThumbnailMaxPixelSize: 512,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
                     kCGImageSourceShouldCacheImmediately: true
-                  ] as CFDictionary) else { throw MediaError.corruptGIF }
+                  ] as CFDictionary) else { throw isGIF ? MediaError.corruptGIF : MediaError.corruptImage }
             // Validate each frame with a small thumbnail. The source and decoded
             // full-size frames are not cached, so long GIFs do not fill memory.
-            for index in 0..<CGImageSourceGetCount(imageSource) {
+            // A still HEIF may have depth/auxiliary frames; only its primary image
+            // is needed for display, whereas all animated GIF frames must decode.
+            for index in (isGIF ? Array(0..<CGImageSourceGetCount(imageSource)) : [primaryIndex]) {
                 try Task.checkCancellation()
                 let isDecodable = autoreleasepool {
                     CGImageSourceCreateThumbnailAtIndex(imageSource, index, [
                         kCGImageSourceCreateThumbnailFromImageAlways: true,
                         kCGImageSourceThumbnailMaxPixelSize: 16,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
                         kCGImageSourceShouldCacheImmediately: true
                     ] as CFDictionary) != nil
                 }
                 guard isDecodable, CGImageSourceGetStatusAtIndex(imageSource, index) == .statusComplete,
                       CGImageSourceCopyPropertiesAtIndex(imageSource, index, nil) != nil else {
-                    throw MediaError.corruptGIF
+                    throw isGIF ? MediaError.corruptGIF : MediaError.corruptImage
                 }
             }
             thumbnail = image
         } else {
-            let extensionHint = source.pathExtension.lowercased()
-            guard ["mp4", "mov", "m4v", "data", "tmp", ""].contains(extensionHint) else {
-                throw MediaError.unsupportedMedia
+            // NSItemProvider frequently hands us .data/.tmp files. Recognize the
+            // container instead of rejecting those or blindly renaming MOV to MP4.
+            let detectedExtension = try videoContainerExtension(at: staging,
+                                                               extensionHint: source.pathExtension)
+            if let detectedExtension, staging.pathExtension.lowercased() != detectedExtension {
+                let renamed = staging.deletingPathExtension().appendingPathExtension(detectedExtension)
+                try manager.moveItem(at: staging, to: renamed)
+                staging = renamed
             }
             let asset = AVURLAsset(url: staging)
             let playable = try await asset.load(.isPlayable)
@@ -279,16 +294,18 @@ final class AnimationLibrary: ObservableObject {
             let duration = try await asset.load(.duration).seconds
             guard duration.isFinite, duration > 0 else { throw MediaError.unsupportedMedia }
             kind = .video
-            fileExtension = extensionHint == "mov" ? "mov" : "mp4"
+            // AVFoundation also recognizes older QuickTime files without ftyp.
+            // Keeping .mov is safe for that validated QuickTime fallback.
+            fileExtension = detectedExtension ?? "mov"
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 512, height: 512)
-            thumbnail = try generator.copyCGImage(at: .zero, actualTime: nil)
+            thumbnail = try await generator.image(at: .zero).image
         }
 
         try Task.checkCancellation()
         let mediaName = "\(id.uuidString).\(fileExtension)"
-        let imageName = "\(id.uuidString).jpg"
+        let imageName = "\(id.uuidString)-thumbnail.jpg"
         let target = directory.appendingPathComponent(mediaName)
         let imageTarget = directory.appendingPathComponent(imageName)
         finalURL = target
@@ -299,13 +316,30 @@ final class AnimationLibrary: ObservableObject {
         try imageData.write(to: imageTarget, options: .atomic)
         try manager.moveItem(at: staging, to: target)
         try Task.checkCancellation()
-        let rawName = source.deletingPathExtension().lastPathComponent
+        let nameSource = suggestedName.map { URL(fileURLWithPath: $0) } ?? source
+        let rawName = nameSource.deletingPathExtension().lastPathComponent
         let displayName = rawName.hasPrefix("duocue-import-") || rawName.hasPrefix("PhotoImport-")
-            ? "自定义动画" : rawName
+            || rawName.isEmpty ? "自定义素材" : rawName
         let item = AnimationAsset(id: id, name: String(displayName.prefix(100)), fileName: mediaName,
                                   thumbnailFileName: imageName, kind: kind, createdAt: Date())
         committed = true
         return item
+    }
+
+    /// ISO BMFF/QuickTime use ftyp's major brand. Read only a small header; the
+    /// complete video stays on disk even when imported from iCloud or Files.
+    nonisolated private static func videoContainerExtension(at url: URL, extensionHint: String) throws -> String? {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let prefix = try handle.read(upToCount: 256) ?? Data()
+        if prefix.count >= 12, String(data: prefix[4..<8], encoding: .ascii) == "ftyp" {
+            return String(data: prefix[8..<12], encoding: .ascii) == "qt  " ? "mov" : "mp4"
+        }
+        switch extensionHint.lowercased() {
+        case "mov": return "mov"
+        case "mp4", "m4v": return "mp4"
+        default: return nil
+        }
     }
 
     nonisolated private static func readableError(_ error: Error) -> String {
@@ -318,13 +352,14 @@ final class AnimationLibrary: ObservableObject {
     }
 
     private enum MediaError: LocalizedError {
-        case emptyFile, corruptGIF, unsupportedMedia, thumbnailFailed
+        case emptyFile, corruptGIF, corruptImage, unsupportedMedia, thumbnailFailed
         case unsafeCatalog, unsupportedCatalog, unavailableStorage
         var errorDescription: String? {
             switch self {
             case .emptyFile: return "所选文件为空或无法读取，请重新选择。"
             case .corruptGIF: return "这段 GIF 已损坏，无法完整播放。"
-            case .unsupportedMedia: return "请选择可播放的 GIF、MP4 或 MOV 动画。"
+            case .corruptImage: return "这张图片已损坏或无法解码，请重新选择。"
+            case .unsupportedMedia: return "请选择图片、GIF、MP4 或 MOV 视频。受保护的视频暂时无法导入。"
             case .thumbnailFailed: return "无法生成素材预览，请换一段素材。"
             case .unsafeCatalog: return "素材目录包含无效路径，已停止读取以保护本机文件。"
             case .unsupportedCatalog: return "素材目录版本暂不受支持。"
