@@ -1,4 +1,22 @@
-# 验证记录 · 2026-10-24
+# 验证记录 · 2026-10-31
+
+## 0.2.0 当前交付
+
+- 构建源码：`4da37520d22bc750375a2e837ba39382a82d0740`。
+- [云端构建 #5](https://github.com/Reluctant2828/duocue-camera/actions/runs/41192688054)：Xcode 27.1 / iOS 27.1 SDK，模拟器测试和 arm64 archive 全部通过。
+- 原生 XCTest：29 项通过，0 failures。包括5项 NSItemProvider 格式、临时文件和取消测试，10项素材库/图片/GIF/真实 MP4/MOV/旧目录测试，7项可靠保存测试，3项录制授权请求测试，2项静图解码测试及2项横竖屏渲染检查。
+- Python：6项云端通过（含 macOS 符号链接打包测试）；本机 Windows 为5项通过、1项平台跳过。
+- 已检查两张素材库内容布局截图；精简首屏说明，把已选素材提前。截图是带合成素材的布局夹具，不是手机相册或 Duo 外屏的实拍。
+- IPA：`dist/ios/DuoCue-0.2.0.ipa`，1,542,513字节；SHA-256 为 `0ac9c914ba04394720141af41b87cfbb2da8ee7accb88248537fbd27abce96ba`，与云端 checksum 一致。
+- 已确认 IPA 版本为0.2.0（build 2）、名称DuoCue、Bundle ID `com.reluctant2828.duocue`、最低 iOS27.1、arm64。猫猫图标源文件保持原样。
+
+### 验证边界
+
+用户已确认0.1.0经 SideStore 安装后可使用。0.2.0 的 Photos 原始 GIF、PNG/JPEG、视频文件、取消和持久化链路已用系统提供者 API 与真实生成的媒体文件验证；真实个人相册/iCloud下载、相机收音以及 Duo 外屏仍需覆盖安装后验证。
+
+旧版 Swift5 并发与若干 API 弃用警告仍存在；构建无错误。本次没有将源码检查或模拟器结果标记为 Duo 真机验证通过。
+
+## 0.1.0 历史验证
 
 Windows 与 GitHub Actions 检查通过；这不是 iPhone Duo 真机通过证明。
 
