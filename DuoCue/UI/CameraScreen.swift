@@ -26,13 +26,9 @@ struct CameraScreen: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 header
-                if geometry.size.width > geometry.size.height * 1.25 {
-                    HStack(spacing: 0) {
-                        viewfinder
-                        controls.frame(width: min(300, geometry.size.width * 0.34))
-                    }
-                } else {
+                AdaptiveCameraLayout(size: geometry.size) {
                     viewfinder
+                } controls: {
                     controls
                 }
             }

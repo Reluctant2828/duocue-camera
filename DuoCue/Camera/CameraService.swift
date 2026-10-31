@@ -313,11 +313,9 @@ final class CameraService: NSObject, ObservableObject {
             let wasReady = self.rotation.latestAngle != nil
             guard self.rotation.update(angle) else { return }
             if !wasReady { self.publish { $0.isOrientationReady = true } }
-            self.applyRotation(to: self.photoOutput.connection(with: .video))
-            // A movie keeps the orientation that it had when recording began.
-            if !self.movieInFlight {
-                self.applyRotation(to: self.movieOutput.connection(with: .video))
-            }
+            // Rotation notifications only cache state. Setting output transforms
+            // while layout and preview rotation are changing can contend with
+            // the running capture graph. Apply at the shutter/start boundary.
         }
     }
 

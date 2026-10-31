@@ -60,7 +60,7 @@ final class PreviewSurface: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        rotationObserver.applyCurrentAngles()
+        rotationObserver.refreshPreview()
     }
 
     override func didMoveToWindow() {
