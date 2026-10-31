@@ -1,6 +1,14 @@
 # 验证记录 · 2026-10-31
 
-## 0.2.0 当前交付
+## 0.2.1 当前交付 · 相机方向修复
+
+- 用户报告0.2.0预览存在上下颠倒/横转；此前自动化测试没有覆盖真实相机传感器和跨屏角度。
+- 已采用苹果 `AVCaptureDevice.RotationCoordinator`，由实际镜头与预览层提供初始及实时方向。预览/捕获分别使用对应角度，删除手写方向表。
+- 源码 `3ef0a265e2509373a37b50d6afa94d88cab65b0b`，[云端构建 #6](https://github.com/Reluctant2828/duocue-camera/actions/runs/41194170358) 编译和 archive 成功，33项 XCTest 全部通过，0 failures。
+- 新增4项方向状态测试；系统协调器在真实 Duo 上的输出及最终画面朝向仍须真机验收，不能由模拟器测试替代。
+- `dist/ios/DuoCue-0.2.1.ipa` 已核对版本0.2.1/build3、arm64、原Bundle ID及系统方向协调器链接，SHA-256：`4d951f933ac9f29c326454e7a4431ba9e50df98604783cfb305eea72966a5087`。
+
+## 0.2.0 历史交付
 
 - 构建源码：`4da37520d22bc750375a2e837ba39382a82d0740`。
 - [云端构建 #5](https://github.com/Reluctant2828/duocue-camera/actions/runs/41192688054)：Xcode 27.1 / iOS 27.1 SDK，模拟器测试和 arm64 archive 全部通过。
