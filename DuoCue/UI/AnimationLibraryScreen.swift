@@ -20,17 +20,18 @@ struct AnimationLibraryScreen: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    Text("让镜头前，多一点惊喜。")
-                        .font(.title2.weight(.bold))
-                    Text("图片会显示在外屏，GIF 和视频会静音循环。拍摄文件只记录镜头拍到的画面。")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 16) {
+                    if library.assets.isEmpty {
+                        Text("选一份素材，放到外屏。")
+                            .font(.title2.weight(.bold))
+                    }
+                    Text("图片保持显示 · GIF 和视频静音循环")
+                        .font(.caption).foregroundStyle(.secondary)
                     importButtons
                     Picker("显示方式", selection: $library.fit) {
                         Text("完整显示").tag(AnimationFit.fit)
                         Text("填满裁切").tag(AnimationFit.fill)
                     }.pickerStyle(.segmented)
-                    sampleCard
                     if let selected = library.selectedAsset {
                         Label("当前使用：\(selected.name)", systemImage: "checkmark.circle.fill")
                             .font(.subheadline).foregroundStyle(.yellow).lineLimit(2)
@@ -47,6 +48,7 @@ struct AnimationLibraryScreen: View {
                         ContentUnavailableView("导入第一份素材", systemImage: "photo.badge.plus",
                             description: Text("从相册选择图片、GIF 或视频，也可以从“文件”中导入。"))
                     }
+                    sampleCard
                     Text("支持常见图片、GIF、MP4 和 MOV。iCloud 素材会先下载原文件；导入后离线可用。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -143,8 +145,8 @@ struct AnimationLibraryScreen: View {
                 Image(systemName: "eyes.inverse").font(.system(size: 34))
                     .foregroundStyle(.yellow).frame(width: 54, height: 54)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("内置测试动画").font(.headline)
-                    Text("首次安装，用它检查外屏播放").font(.caption).foregroundStyle(.secondary)
+                    Text("内置笑脸").font(.headline)
+                    Text("不导入素材，也可以直接使用").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: library.selectedID == nil ? "checkmark.circle.fill" : "circle")
