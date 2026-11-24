@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_release:
+        description: '构建成功后发布到 GitHub Releases（标签 v<版本号>，已存在则失败，不覆盖）'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -21,6 +26,8 @@ jobs:
     if: ${{ inputs.free_quota_confirmed }}
     runs-on: xcode-27
     timeout-minutes: 20
+    permissions:
+      contents: write
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
@@ -72,6 +79,30 @@ jobs:
             build/DuoCue-unsigned.ipa.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Publish unsigned IPA to GitHub Releases
+        if: ${{ inputs.publish_release }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          APP_PLIST=build/DuoCue.xcarchive/Products/Applications/DuoCue.app/Info.plist
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_PLIST")"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP_PLIST")"
+          TAG="v$VERSION"
+          ASSET="DuoCue-$VERSION-unsigned.ipa"
+          cp build/DuoCue-unsigned.ipa "build/$ASSET"
+          (cd build && shasum -a 256 "$ASSET" > "$ASSET.sha256")
+          NOTES="docs/RELEASE-$VERSION.md"
+          {
+            if [ -f "$NOTES" ]; then cat "$NOTES"; echo; fi
+            echo '---'
+            echo "未签名 IPA（arm64，build $BUILD）。需用 SideStore / AltStore 等工具以自己的 Apple ID 签名后安装。"
+            echo "SHA-256：\`$(cut -d' ' -f1 "build/$ASSET.sha256")\`"
+          } > build/release-notes.md
+          gh release create "$TAG" "build/$ASSET" "build/$ASSET.sha256" \
+            --target "$GITHUB_SHA" --title "DuoCue $VERSION" --notes-file build/release-notes.md
       - name: Export visual review attachments
         if: ${{ always() }}
         shell: bash
