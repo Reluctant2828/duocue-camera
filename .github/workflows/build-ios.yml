@@ -98,8 +98,8 @@ jobs:
           {
             if [ -f "$NOTES" ]; then cat "$NOTES"; echo; fi
             echo '---'
-            echo "未签名 IPA（arm64，build $BUILD）。需用 SideStore / AltStore 等工具以自己的 Apple ID 签名后安装。"
-            echo "SHA-256：\`$(cut -d' ' -f1 "build/$ASSET.sha256")\`"
+            echo "未签名 IPA（arm64，build ${BUILD}）。需用 SideStore / AltStore 等工具以自己的 Apple ID 签名后安装。"
+            echo "SHA-256：\`$(cut -d' ' -f1 "build/${ASSET}.sha256")\`"
           } > build/release-notes.md
           gh release create "$TAG" "build/$ASSET" "build/$ASSET.sha256" \
             --target "$GITHUB_SHA" --title "DuoCue $VERSION" --notes-file build/release-notes.md
